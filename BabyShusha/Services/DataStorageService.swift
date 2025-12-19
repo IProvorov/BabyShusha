@@ -315,6 +315,7 @@ class DataStorageService {
             return false
         }
     }
+    
 }
 
 // MARK: - Supporting Structures
@@ -359,4 +360,5 @@ struct ChildSleepStatistics {
     var averageQualityFormatted: String {
         return String(format: "%.1f", averageQuality)
     }
+    
 }

@@ -139,12 +139,19 @@ class SleepTrackerViewModel: ObservableObject {
     
     func loadWeeklyStats() {
         if let childId = selectedChildId {
-            // Используем существующий метод getWeeklyStatistics()
-            // и фильтруем сессии по childId
-            let allStats = storageService.getWeeklyStatistics()
-            let childSessions = allStats.sessions.filter { $0.childId == childId }
-            weeklyStats = SleepStatistics(period: "week", sessions: childSessions)
+            // ФИЛЬТРУЕМ ВРУЧНУЮ, так как метода getWeeklyStatistics(for:) нет
+            let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+            let allSessions = storageService.loadSleepSessions()
+            
+            // Фильтруем: 1) сессии за неделю, 2) только для выбранного ребенка
+            let childWeeklySessions = allSessions.filter {
+                session in
+                session.endTime > weekAgo && session.childId == childId
+            }
+            
+            weeklyStats = SleepStatistics(period: "week", sessions: childWeeklySessions)
         } else {
+            // Если ребенок не выбран, используем существующий метод
             weeklyStats = storageService.getWeeklyStatistics()
         }
     }
@@ -210,13 +217,12 @@ class SleepTrackerViewModel: ObservableObject {
 // MARK: - Текущая активная сессия
 struct CurrentSleepSession {
     let id = UUID()
-    let childId: UUID // Добавляем childId
+    let childId: UUID
     let startTime: Date
     var quality: Int?
     var notes: String?
     var mood: String?
     
-    // Инициализатор
     init(childId: UUID, startTime: Date, quality: Int? = nil, notes: String? = nil, mood: String? = nil) {
         self.childId = childId
         self.startTime = startTime
