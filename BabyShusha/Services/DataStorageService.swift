@@ -18,8 +18,6 @@ class DataStorageService {
     
     // MARK: - Child Profiles
     
-    
-    
     func saveChildProfile(_ profile: ChildProfile) {
         var profiles = loadChildProfiles()
         
@@ -315,7 +313,6 @@ class DataStorageService {
             return false
         }
     }
-    
 }
 
 // MARK: - Supporting Structures
@@ -326,8 +323,6 @@ struct ExportData: Codable {
     let childProfiles: [ChildProfile]
     let activeChildId: String?
 }
-
-
 
 // Статистика по ребенку
 struct ChildSleepStatistics {
@@ -360,5 +355,4 @@ struct ChildSleepStatistics {
     var averageQualityFormatted: String {
         return String(format: "%.1f", averageQuality)
     }
-    
 }
