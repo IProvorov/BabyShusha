@@ -119,16 +119,16 @@ class SleepTrackerViewModel: ObservableObject {
     func loadSleepHistory() {
         isLoading = true
         
-        // Если выбран ребенок, загружаем только его сессии
+        let allSessions = storageService.loadSleepSessions()
+        
         if let childId = selectedChildId {
-            sleepHistory = storageService.loadSleepSessions()
-                .filter { $0.childId == childId } // Фильтруем по childId
+            sleepHistory = allSessions
+                .filter { $0.childId == childId }
                 .sorted { $0.startTime > $1.startTime }
                 .prefix(50)
                 .map { $0 }
         } else {
-            // Если ребенок не выбран, загружаем все сессии
-            sleepHistory = storageService.loadSleepSessions()
+            sleepHistory = allSessions
                 .sorted { $0.startTime > $1.startTime }
                 .prefix(50)
                 .map { $0 }
@@ -138,14 +138,16 @@ class SleepTrackerViewModel: ObservableObject {
     }
     
     func loadWeeklyStats() {
-           if let childId = selectedChildId {
-               // Получаем статистику только для выбранного ребенка
-               weeklyStats = storageService.getWeeklyStatistics(for: childId)
-           } else {
-               // Получаем общую статистику (все дети)
-               weeklyStats = storageService.getWeeklyStatistics()
-           }
-       }
+        if let childId = selectedChildId {
+            // Используем существующий метод getWeeklyStatistics()
+            // и фильтруем сессии по childId
+            let allStats = storageService.getWeeklyStatistics()
+            let childSessions = allStats.sessions.filter { $0.childId == childId }
+            weeklyStats = SleepStatistics(period: "week", sessions: childSessions)
+        } else {
+            weeklyStats = storageService.getWeeklyStatistics()
+        }
+    }
     
     func deleteSession(_ session: SleepSession) {
         storageService.deleteSleepSession(session)
