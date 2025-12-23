@@ -1,6 +1,8 @@
 // Views/SleepTrackerView.swift
 import SwiftUI
 
+
+
 struct SleepTrackerView: View {
     @EnvironmentObject var viewModel: SleepTrackerViewModel
     @EnvironmentObject var childProfileVM: ChildProfileViewModel
@@ -13,6 +15,8 @@ struct SleepTrackerView: View {
     @State private var selectedQuality: Int = 8
     @State private var notesText: String = ""
     @State private var selectedMood: String = "Спокойный"
+    
+    
     
     let moods = ["Счастливый", "Спокойный", "Уставший", "Беспокойный", "Больной"]
     
