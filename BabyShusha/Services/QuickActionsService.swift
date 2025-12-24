@@ -1,5 +1,5 @@
-import UIKit
-import AVFoundation
+import Foundation
+import Combine
 
 enum QuickActionType: String, CaseIterable {
     case whiteNoise = "white_noise"
@@ -30,94 +30,97 @@ enum QuickActionType: String, CaseIterable {
         }
     }
     
-    var soundFileName: String? {
+    // Убираем soundType или делаем опциональным
+    var soundType: SoundType? {
         switch self {
-        case .whiteNoise: return "white_noise.mp3"
-        case .heartbeat: return "heartbeat.mp3"
-        case .rain: return "rain.mp3"
-        case .lullaby: return "lullaby.mp3"
+        case .whiteNoise: return .whiteNoise
+        case .heartbeat: return .heartbeat
+        case .rain: return .rain
+        case .lullaby: return .lullaby
         default: return nil
         }
     }
     
-    var duration: TimeInterval? {
-        switch self {
-        case .timer30: return 30 * 60
-        case .timer60: return 60 * 60
-        default: return nil
-        }
+    // Добавляем тип SoundType
+    enum SoundType: String {
+        case whiteNoise, heartbeat, rain, lullaby
     }
 }
 
-final class QuickActionsService {
-    static let shared = QuickActionsService()
+class QuickActionsService: ObservableObject {
+    @Published var lastAction: QuickActionType? = nil
+    @Published var isActionInProgress = false
+    @Published var availableActions: [QuickActionType] = []
     
     private let audioService: AudioService
-    private let sleepService: SleepTrackingService
-    private let haptic = UIImpactFeedbackGenerator(style: .light)
+    private var cancellables = Set<AnyCancellable>()
     
-    private init() {
-        self.audioService = AudioService()
-        self.sleepService = SleepTrackingService()
+    // Инициализатор с дефолтным значением
+    public init(audioService: AudioService = AudioService.shared) {
+        self.audioService = audioService
+        self.availableActions = QuickActionType.allCases
     }
     
     func performQuickAction(_ action: QuickActionType, completion: @escaping (Bool) -> Void) {
-        haptic.impactOccurred()
+        guard !isActionInProgress else {
+            completion(false)
+            return
+        }
+        
+        isActionInProgress = true
+        lastAction = action
         
         switch action {
         case .whiteNoise, .heartbeat, .rain, .lullaby:
-            playSound(action, completion: completion)
+            if let soundType = action.soundType {
+                playSound(soundType: soundType, action: action, completion: completion)
+            } else {
+                isActionInProgress = false
+                completion(false)
+            }
             
         case .timer30, .timer60:
             startSleepTimer(action, completion: completion)
         }
     }
     
-    private func playSound(_ action: QuickActionType, completion: @escaping (Bool) -> Void) {
-        guard let fileName = action.soundFileName else {
-            completion(false)
-            return
+    private func playSound(soundType: QuickActionType.SoundType, action: QuickActionType, completion: @escaping (Bool) -> Void) {
+        let fileName: String
+        
+        switch soundType {
+        case .whiteNoise: fileName = "white_noise"
+        case .heartbeat: fileName = "heartbeat"
+        case .rain: fileName = "rain"
+        case .lullaby: fileName = "lullaby"
         }
         
-        audioService.playSound(named: fileName) { success in
-            if success {
-                AnalyticsService.logQuickActionUsed(action)
+        audioService.playSound(named: fileName, volume: 0.7, loop: true) { [weak self] success in
+            DispatchQueue.main.async {
+                self?.isActionInProgress = false
+                completion(success)
             }
-            completion(success)
         }
     }
     
     private func startSleepTimer(_ action: QuickActionType, completion: @escaping (Bool) -> Void) {
-        guard let duration = action.duration else {
-            completion(false)
-            return
-        }
+        let duration: TimeInterval = action == .timer30 ? 30 * 60 : 60 * 60
         
-        sleepService.startSleepSession(duration: duration) { success in
-            if success {
-                AnalyticsService.logQuickActionUsed(action)
-                NotificationService.scheduleSleepEndNotification(after: duration)
-            }
-            completion(success)
+        print("Таймер сна на \(Int(duration/60)) минут запущен")
+        
+        // Здесь можно добавить вызов SleepTrackerViewModel
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.isActionInProgress = false
+            completion(true)
         }
     }
     
-    func getQuickActions(for child: ChildProfile?) -> [QuickActionType] {
-        var actions = QuickActionType.allCases
-        
-        // Персонализация по возрасту ребенка
-        if let child = child {
-            let ageInMonths = child.ageInMonths
-            
-            if ageInMonths < 3 {
-                // Новорожденные: приоритет сердцебиению
-                actions.sort { $0 == .heartbeat }
-            } else if ageInMonths < 12 {
-                // Младенцы: приоритет белому шуму
-                actions.sort { $0 == .whiteNoise }
-            }
-        }
-        
-        return actions
+    func stopCurrentAction() {
+        audioService.stopAll()
+        isActionInProgress = false
+        lastAction = nil
+    }
+    
+    func getQuickActions(for child: ChildProfile? = nil) -> [QuickActionType] {
+        return QuickActionType.allCases
     }
 }

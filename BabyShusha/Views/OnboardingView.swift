@@ -1,46 +1,51 @@
+// OnboardingView.swift
 import SwiftUI
 
 struct OnboardingView: View {
     @Binding var hasCompletedOnboarding: Bool
+    @EnvironmentObject var childProfileVM: ChildProfileViewModel
+    
     @State private var currentPage = 0
     @State private var showChildProfileCreation = false
     @State private var childName = ""
-    @State private var childBirthDate = Date()
+    @State private var childBirthDate = Date().addingTimeInterval(-90 * 24 * 60 * 60) // 3 месяца назад
     @State private var childGender: ChildGender = .notSpecified
-    @State private var isLoading = false
+    @State private var avatarEmoji = "👶"
     
     let pages = [
         OnboardingPage(
             title: "Добро пожаловать в BabyShusha",
             subtitle: "Помогаем мамам организовать сон малыша быстро и удобно",
-            imageName: "onboarding_welcome",
-            color: Color(red: 0.2, green: 0.4, blue: 0.8)
+            imageName: "moon.zzz.fill",
+            color: .blue
         ),
         OnboardingPage(
             title: "Быстрые действия",
-            subtitle: "Запускайте колыбельные и белый шум в один клик, даже не разблокируя телефон",
-            imageName: "onboarding_quickstart",
-            color: Color(red: 0.6, green: 0.3, blue: 0.8)
+            subtitle: "Запускайте колыбельные и белый шум в один клик",
+            imageName: "bolt.fill",
+            color: .purple
         ),
         OnboardingPage(
             title: "Ночные кормления",
-            subtitle: "Ночной режим с тусклым светом и быстрым доступом ко всем функциям",
-            imageName: "onboarding_night",
-            color: Color(red: 0.3, green: 0.2, blue: 0.5)
+            subtitle: "Ночной режим с тусклым светом и быстрым доступом",
+            imageName: "moon.stars.fill",
+            color: .indigo
         ),
         OnboardingPage(
             title: "Умные рекомендации",
             subtitle: "Персонализированные советы по режиму сна в зависимости от возраста малыша",
-            imageName: "onboarding_recommendations",
-            color: Color(red: 0.1, green: 0.5, blue: 0.6)
+            imageName: "lightbulb.fill",
+            color: .orange
         ),
         OnboardingPage(
             title: "Любимые комбинации",
             subtitle: "Сохраняйте пресеты звуков и запускайте их одним нажатием",
-            imageName: "onboarding_presets",
-            color: Color(red: 0.8, green: 0.4, blue: 0.2)
+            imageName: "music.note.list",
+            color: .green
         )
     ]
+    
+    let avatarEmojis = ["👶", "👧", "👦", "🧒", "👼", "🐣", "🐻", "🐰", "🐶", "🐱", "🐯", "🦁"]
     
     var body: some View {
         ZStack {
@@ -59,7 +64,7 @@ struct OnboardingView: View {
             
             VStack(spacing: 0) {
                 // Пропустить кнопка (только не на первой странице)
-                if currentPage > 0 {
+                if currentPage > 0 && currentPage < pages.count - 1 {
                     HStack {
                         Spacer()
                         Button("Пропустить") {
@@ -68,7 +73,7 @@ struct OnboardingView: View {
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.8))
                         .padding(.trailing, 20)
-                        .padding(.top, 10)
+                        .padding(.top, 50)
                     }
                 }
                 
@@ -100,11 +105,6 @@ struct OnboardingView: View {
                     } label: {
                         HStack {
                             if currentPage == pages.count - 1 {
-                                if isLoading {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        .padding(.trailing, 8)
-                                }
                                 Text("Создать профиль")
                                     .fontWeight(.semibold)
                             } else {
@@ -120,27 +120,22 @@ struct OnboardingView: View {
                         .shadow(color: .black.opacity(0.1), radius: 5, x: 0, y: 2)
                     }
                     .padding(.horizontal, 30)
-                    .padding(.bottom, 30)
-                    .disabled(isLoading)
+                    .padding(.bottom, 40)
                 }
                 .padding(.top, 20)
             }
         }
-        .overlay(
-            Group {
-                if showChildProfileCreation {
-                    ChildProfileCreationView(
-                        childName: $childName,
-                        childBirthDate: $childBirthDate,
-                        childGender: $childGender,
-                        onSave: saveChildProfile,
-                        onCancel: { showChildProfileCreation = false }
-                    )
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
-        )
-        .animation(.spring(), value: showChildProfileCreation)
+        .sheet(isPresented: $showChildProfileCreation) {
+            ChildProfileCreationView(
+                childName: $childName,
+                childBirthDate: $childBirthDate,
+                childGender: $childGender,
+                avatarEmoji: $avatarEmoji,
+                avatarEmojis: avatarEmojis,
+                onSave: saveChildProfile,
+                onCancel: { showChildProfileCreation = false }
+            )
+        }
     }
     
     // MARK: - Actions
@@ -158,86 +153,31 @@ struct OnboardingView: View {
     }
     
     private func skipOnboarding() {
-        // Создаем дефолтный профиль при пропуске
-        createDefaultChildProfile()
+        createDefaultChild()
         completeOnboarding()
     }
     
     private func saveChildProfile() {
         guard !childName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            // Показать ошибку
             return
         }
         
-        isLoading = true
-        
-        // Создаем профиль ребенка
-        let child = ChildProfile(
-            id: UUID(),
+        childProfileVM.addChild(
             name: childName.trimmingCharacters(in: .whitespacesAndNewlines),
             birthDate: childBirthDate,
-            gender: childGender
+            avatarEmoji: avatarEmoji
         )
         
-        // Сохраняем в сервисе
-        ChildProfileService.shared.saveChild(child)
-        ChildProfileService.shared.setActiveChild(child.id)
-        
-        // Создаем дефолтные пресеты для этого возраста
-        createDefaultPresets(for: child)
-        
-        // Завершаем onboarding с небольшой задержкой
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            isLoading = false
-            completeOnboarding()
-        }
+        completeOnboarding()
     }
     
-    private func createDefaultChildProfile() {
-        let child = ChildProfile(
-            id: UUID(),
+    private func createDefaultChild() {
+        let birthDate = Calendar.current.date(byAdding: .month, value: -6, to: Date()) ?? Date()
+        childProfileVM.addChild(
             name: "Малыш",
-            birthDate: Date().addingTimeInterval(-3 * 30 * 24 * 60 * 60), // 3 месяца назад
-            gender: .notSpecified
+            birthDate: birthDate,
+            avatarEmoji: "👶"
         )
-        
-        ChildProfileService.shared.saveChild(child)
-        ChildProfileService.shared.setActiveChild(child.id)
-        createDefaultPresets(for: child)
-    }
-    
-    private func createDefaultPresets(for child: ChildProfile) {
-        let presetService = SoundPresetService.shared
-        
-        // Пресет для новорожденных
-        if child.ageInMonths <= 3 {
-            let newbornPreset = SoundPreset(
-                id: UUID(),
-                name: "Для новорожденного",
-                sounds: [
-                    SoundPreset.SoundConfiguration(type: .heartbeat, isEnabled: true, individualVolume: 0.7),
-                    SoundPreset.SoundConfiguration(type: .whiteNoise, isEnabled: true, individualVolume: 0.5)
-                ],
-                volume: 0.6,
-                isFavorite: true,
-                createdAt: Date()
-            )
-            presetService.savePreset(newbornPreset)
-        }
-        
-        // Универсальный пресет
-        let universalPreset = SoundPreset(
-            id: UUID(),
-            name: "Глубокий сон",
-            sounds: [
-                SoundPreset.SoundConfiguration(type: .rain, isEnabled: true, individualVolume: 0.8),
-                SoundPreset.SoundConfiguration(type: .lullaby, isEnabled: false, individualVolume: 0.0)
-            ],
-            volume: 0.5,
-            isFavorite: true,
-            createdAt: Date()
-        )
-        presetService.savePreset(universalPreset)
     }
     
     private func completeOnboarding() {
@@ -247,16 +187,6 @@ struct OnboardingView: View {
         
         // Сохраняем флаг, что onboarding завершен
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
-        
-        // Показываем краткое приветствие
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            showWelcomeMessage()
-        }
-    }
-    
-    private func showWelcomeMessage() {
-        // Можно реализовать через Alert или кастомное уведомление
-        print("Добро пожаловать в BabyShusha!")
     }
 }
 
@@ -277,20 +207,10 @@ struct OnboardingPageView: View {
             Spacer()
             
             // Изображение
-            if page.imageName.hasPrefix("onboarding_") {
-                Image(page.imageName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxHeight: 250)
-                    .padding(.horizontal, 20)
-                    .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
-            } else {
-                // Fallback системная иконка
-                Image(systemName: getSystemImageForPage())
-                    .font(.system(size: 100))
-                    .foregroundColor(.white.opacity(0.9))
-                    .frame(height: 200)
-            }
+            Image(systemName: page.imageName)
+                .font(.system(size: 120))
+                .foregroundColor(.white.opacity(0.9))
+                .frame(height: 200)
             
             // Текст
             VStack(spacing: 16) {
@@ -313,17 +233,6 @@ struct OnboardingPageView: View {
         }
         .padding(.horizontal, 20)
     }
-    
-    private func getSystemImageForPage() -> String {
-        switch page.imageName {
-        case "onboarding_welcome": return "moon.zzz.fill"
-        case "onboarding_quickstart": return "bolt.fill"
-        case "onboarding_night": return "moon.stars.fill"
-        case "onboarding_recommendations": return "lightbulb.fill"
-        case "onboarding_presets": return "music.note.list"
-        default: return "heart.fill"
-        }
-    }
 }
 
 // MARK: - ChildProfileCreationView
@@ -331,96 +240,55 @@ struct ChildProfileCreationView: View {
     @Binding var childName: String
     @Binding var childBirthDate: Date
     @Binding var childGender: ChildGender
+    @Binding var avatarEmoji: String
+    let avatarEmojis: [String]
     var onSave: () -> Void
     var onCancel: () -> Void
-    
-    @State private var showDatePicker = false
+    @Environment(\.dismiss) var dismiss
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Заголовок
-            HStack {
-                Button("Отмена") {
-                    onCancel()
-                }
-                .foregroundColor(.blue)
-                
-                Spacer()
-                
-                Text("Профиль малыша")
-                    .font(.headline)
-                
-                Spacer()
-                
-                Button("Готово") {
-                    onSave()
-                }
-                .fontWeight(.semibold)
-                .foregroundColor(.blue)
-                .disabled(childName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            .padding()
-            .background(Color(.systemBackground))
-            
-            Divider()
-            
+        NavigationView {
             Form {
                 Section {
-                    // Имя ребенка
+                    // Эмодзи аватар
+                    VStack {
+                        Text(avatarEmoji)
+                            .font(.system(size: 60))
+                            .frame(height: 80)
+                        
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 15) {
+                                ForEach(avatarEmojis, id: \.self) { emoji in
+                                    Button {
+                                        avatarEmoji = emoji
+                                    } label: {
+                                        Text(emoji)
+                                            .font(.title)
+                                            .frame(width: 50, height: 50)
+                                            .background(avatarEmoji == emoji ? Color.blue.opacity(0.2) : Color.clear)
+                                            .cornerRadius(10)
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 10)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                }
+                
+                Section("Основная информация") {
                     TextField("Имя малыша", text: $childName)
                         .font(.body)
                         .submitLabel(.done)
-                        .onSubmit {
-                            if !childName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                onSave()
-                            }
-                        }
-                } header: {
-                    Text("Основная информация")
-                } footer: {
-                    Text("Используется для персонализации рекомендаций")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                Section {
-                    // Дата рождения
-                    Button {
-                        showDatePicker = true
-                    } label: {
-                        HStack {
-                            Text("Дата рождения")
-                                .foregroundColor(.primary)
-                            
-                            Spacer()
-                            
-                            Text(childBirthDate, style: .date)
-                                .foregroundColor(.secondary)
-                            
-                            Image(systemName: "calendar")
-                                .foregroundColor(.gray)
-                        }
-                    }
-                    .sheet(isPresented: $showDatePicker) {
-                        DatePickerSheet(
-                            selectedDate: $childBirthDate,
-                            maximumDate: Date()
-                        )
-                    }
                     
-                    // Пол
+                    DatePicker("Дата рождения", selection: $childBirthDate, in: ...Date(), displayedComponents: .date)
+                    
                     Picker("Пол", selection: $childGender) {
                         ForEach(ChildGender.allCases, id: \.self) { gender in
                             Text(gender.displayName).tag(gender)
                         }
                     }
-                    .pickerStyle(.segmented)
-                } header: {
-                    Text("Дополнительно")
-                } footer: {
-                    Text("Эти данные можно изменить позже в настройках профиля")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
                 }
                 
                 Section {
@@ -460,11 +328,25 @@ struct ChildProfileCreationView: View {
                     .padding(.vertical, 8)
                 }
             }
+            .navigationTitle("Профиль малыша")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Отмена") {
+                        onCancel()
+                        dismiss()
+                    }
+                }
+                
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Сохранить") {
+                        onSave()
+                        dismiss()
+                    }
+                    .disabled(childName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
         }
-        .frame(maxHeight: 500)
-        .background(Color(.systemBackground))
-        .cornerRadius(20, corners: [.topLeft, .topRight])
-        .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: -5)
     }
     
     private func calculateAgeInMonths() -> Int {
@@ -504,81 +386,10 @@ struct ChildProfileCreationView: View {
     }
 }
 
-// MARK: - DatePickerSheet
-struct DatePickerSheet: View {
-    @Binding var selectedDate: Date
-    let maximumDate: Date
-    @Environment(\.dismiss) var dismiss
-    
-    var body: some View {
-        NavigationView {
-            VStack {
-                DatePicker(
-                    "",
-                    selection: $selectedDate,
-                    in: ...maximumDate,
-                    displayedComponents: .date
-                )
-                .datePickerStyle(.wheel)
-                .labelsHidden()
-                .padding()
-                
-                Spacer()
-            }
-            .navigationTitle("Дата рождения")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Готово") {
-                        dismiss()
-                    }
-                }
-            }
-        }
-    }
-}
-
-// MARK: - ChildProfile Model
-enum ChildGender: String, CaseIterable {
-    case male = "male"
-    case female = "female"
-    case notSpecified = "not_specified"
-    
-    var displayName: String {
-        switch self {
-        case .male: return "Мальчик"
-        case .female: return "Девочка"
-        case .notSpecified: return "Не указано"
-        }
-    }
-}
-
-
-
-// MARK: - Corner Radius Extension
-extension View {
-    func cornerRadius(_ radius: CGFloat, corners: UIRectCorner) -> some View {
-        clipShape(RoundedCorner(radius: radius, corners: corners))
-    }
-}
-
-struct RoundedCorner: Shape {
-    var radius: CGFloat = .infinity
-    var corners: UIRectCorner = .allCorners
-    
-    func path(in rect: CGRect) -> Path {
-        let path = UIBezierPath(
-            roundedRect: rect,
-            byRoundingCorners: corners,
-            cornerRadii: CGSize(width: radius, height: radius)
-        )
-        return Path(path.cgPath)
-    }
-}
-
 // MARK: - Preview
 struct OnboardingView_Previews: PreviewProvider {
     static var previews: some View {
         OnboardingView(hasCompletedOnboarding: .constant(false))
+            .environmentObject(ChildProfileViewModel())
     }
 }

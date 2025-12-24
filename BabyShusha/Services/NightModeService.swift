@@ -1,238 +1,155 @@
+import SwiftUI
 import UIKit
-import AVFoundation
+import Combine
 
-final class NightModeService {
+class NightModeService: ObservableObject {
     static let shared = NightModeService()
     
-    private let userDefaults = UserDefaults.standard
-    private let notificationCenter = NotificationCenter.default
+    @Published var isNightModeEnabled = false
+    @Published var autoNightMode = false
+    @Published var nightModeStartTime = Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: Date())!
+    @Published var nightModeEndTime = Calendar.current.date(bySettingHour: 7, minute: 0, second: 0, of: Date())!
     
-    // MARK: - Properties
+    private let defaults = UserDefaults.standard
+    private var redFilterView: UIView?
+    private var previousBrightness: CGFloat = UIScreen.main.brightness
     
-    var isNightModeEnabled: Bool {
-        get { userDefaults.bool(forKey: "night_mode_enabled") }
-        set {
-            userDefaults.set(newValue, forKey: "night_mode_enabled")
-            if newValue {
-                enableNightMode()
-            } else {
-                disableNightMode()
-            }
-            notificationCenter.post(name: .nightModeChanged, object: newValue)
-        }
-    }
-    
-    var autoNightMode: Bool {
-        get { userDefaults.bool(forKey: "auto_night_mode") }
-        set { userDefaults.set(newValue, forKey: "auto_night_mode") }
-    }
-    
-    var nightModeStartTime: Date? {
-        get {
-            guard let timeInterval = userDefaults.value(forKey: "night_mode_start") as? TimeInterval else {
-                return Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: Date())
-            }
-            return Date(timeIntervalSince1970: timeInterval)
-        }
-        set {
-            userDefaults.set(newValue?.timeIntervalSince1970, forKey: "night_mode_start")
-        }
-    }
-    
-    var nightModeEndTime: Date? {
-        get {
-            guard let timeInterval = userDefaults.value(forKey: "night_mode_end") as? TimeInterval else {
-                return Calendar.current.date(bySettingHour: 7, minute: 0, second: 0, of: Date())
-            }
-            return Date(timeIntervalSince1970: timeInterval)
-        }
-        set {
-            userDefaults.set(newValue?.timeIntervalSince1970, forKey: "night_mode_end")
-        }
-    }
-    
-    // MARK: - Initialization
-    
-    private init() {
+    // Делаем init public
+    public init() {
+        loadSettings()
         setupNotifications()
-        checkAutoNightMode()
     }
     
-    // MARK: - Setup
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+    
+    private func loadSettings() {
+        isNightModeEnabled = defaults.bool(forKey: "night_mode_enabled")
+        autoNightMode = defaults.bool(forKey: "auto_night_mode")
+        
+        if let start = defaults.object(forKey: "night_mode_start") as? Date {
+            nightModeStartTime = start
+        }
+        if let end = defaults.object(forKey: "night_mode_end") as? Date {
+            nightModeEndTime = end
+        }
+        previousBrightness = CGFloat(defaults.float(forKey: "previous_brightness"))
+        if previousBrightness == 0 {
+            previousBrightness = UIScreen.main.brightness
+        }
+    }
+    
+    private func saveSettings() {
+        defaults.set(isNightModeEnabled, forKey: "night_mode_enabled")
+        defaults.set(autoNightMode, forKey: "auto_night_mode")
+        defaults.set(nightModeStartTime, forKey: "night_mode_start")
+        defaults.set(nightModeEndTime, forKey: "night_mode_end")
+        defaults.set(Float(previousBrightness), forKey: "previous_brightness")
+    }
     
     private func setupNotifications() {
-        notificationCenter.addObserver(
+        NotificationCenter.default.addObserver(
             self,
             selector: #selector(appDidBecomeActive),
             name: UIApplication.didBecomeActiveNotification,
             object: nil
         )
-        
-        notificationCenter.addObserver(
-            self,
-            selector: #selector(appWillResignActive),
-            name: UIApplication.willResignActiveNotification,
-            object: nil
-        )
     }
     
-    // MARK: - Night Mode Control
+    // MARK: - Public Methods
+    
+    func toggleNightMode() {
+        if isNightModeEnabled {
+            disableNightMode()
+        } else {
+            enableNightMode()
+        }
+        saveSettings()
+    }
     
     func enableNightMode() {
-        // Уменьшаем яркость экрана
+        previousBrightness = UIScreen.main.brightness
+        defaults.set(Float(previousBrightness), forKey: "previous_brightness")
+        
+        // Уменьшаем яркость
         UIScreen.main.brightness = 0.1
         
-        // Включаем фильтр красного (для ночных кормлений)
+        // Включаем красный фильтр
         enableRedFilter()
-        
-        // Настраиваем аудиосессию для фонового воспроизведения
-        setupAudioSessionForNightMode()
         
         // Отключаем авто-лок
         UIApplication.shared.isIdleTimerDisabled = true
         
-        // Записываем время начала ночного режима
-        userDefaults.set(Date().timeIntervalSince1970, forKey: "night_mode_last_start")
-        
-        AnalyticsService.logNightModeEnabled()
+        isNightModeEnabled = true
+        saveSettings()
     }
     
     func disableNightMode() {
         // Восстанавливаем яркость
-        if let savedBrightness = userDefaults.value(forKey: "previous_brightness") as? CGFloat {
-            UIScreen.main.brightness = savedBrightness
-        }
+        UIScreen.main.brightness = previousBrightness
         
         // Отключаем фильтр
         disableRedFilter()
         
-        // Восстанавливаем аудиосессию
-        restoreAudioSession()
-        
-        // Включаем авто-лок
+        // Восстанавливаем авто-лок
         UIApplication.shared.isIdleTimerDisabled = false
         
-        // Записываем длительность ночного режима
-        if let startTime = userDefaults.value(forKey: "night_mode_last_start") as? TimeInterval {
-            let duration = Date().timeIntervalSince1970 - startTime
-            AnalyticsService.logNightModeDuration(duration)
-        }
+        isNightModeEnabled = false
+        saveSettings()
     }
     
-    func toggleNightMode() {
-        if isNightModeEnabled {
-            // Сохраняем текущую яркость перед выключением
-            userDefaults.set(UIScreen.main.brightness, forKey: "previous_brightness")
-        }
-        isNightModeEnabled.toggle()
-    }
-    
-    // MARK: - Red Filter (для ночных кормлений)
-    
-    private func enableRedFilter() {
-        guard let window = UIApplication.shared.windows.first else { return }
-        
-        let redFilterView = UIView(frame: window.bounds)
-        redFilterView.backgroundColor = UIColor.red.withAlphaComponent(0.05)
-        redFilterView.tag = 9999 // Для идентификации
-        redFilterView.isUserInteractionEnabled = false
-        
-        window.addSubview(redFilterView)
-    }
-    
-    private func disableRedFilter() {
-        UIApplication.shared.windows.forEach { window in
-            window.viewWithTag(9999)?.removeFromSuperview()
-        }
-    }
-    
-    // MARK: - Audio Session
-    
-    private func setupAudioSessionForNightMode() {
-        do {
-            try AVAudioSession.sharedInstance().setCategory(
-                .playback,
-                mode: .default,
-                options: [.mixWithOthers, .duckOthers]
-            )
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("Error setting up audio session: \(error)")
-        }
-    }
-    
-    private func restoreAudioSession() {
-        do {
-            try AVAudioSession.sharedInstance().setCategory(
-                .playback,
-                mode: .default,
-                options: []
-            )
-            try AVAudioSession.sharedInstance().setActive(false)
-        } catch {
-            print("Error restoring audio session: \(error)")
-        }
-    }
-    
-    // MARK: - Auto Night Mode
-    
-    private func checkAutoNightMode() {
+    func checkAutoNightMode() {
         guard autoNightMode else { return }
         
         let currentTime = Date()
         let calendar = Calendar.current
         
-        guard let startTime = nightModeStartTime,
-              let endTime = nightModeEndTime else { return }
-        
         let currentComponents = calendar.dateComponents([.hour, .minute], from: currentTime)
-        let startComponents = calendar.dateComponents([.hour, .minute], from: startTime)
-        let endComponents = calendar.dateComponents([.hour, .minute], from: endTime)
+        let startComponents = calendar.dateComponents([.hour, .minute], from: nightModeStartTime)
+        let endComponents = calendar.dateComponents([.hour, .minute], from: nightModeEndTime)
         
         let currentMinutes = (currentComponents.hour ?? 0) * 60 + (currentComponents.minute ?? 0)
         let startMinutes = (startComponents.hour ?? 0) * 60 + (startComponents.minute ?? 0)
         let endMinutes = (endComponents.hour ?? 0) * 60 + (endComponents.minute ?? 0)
         
-        // Проверяем, нужно ли включать ночной режим
         let shouldEnable: Bool
         
         if startMinutes < endMinutes {
-            // Нормальный интервал (например, 20:00 - 7:00)
             shouldEnable = currentMinutes >= startMinutes && currentMinutes < endMinutes
         } else {
-            // Интервал через полночь (например, 22:00 - 6:00)
             shouldEnable = currentMinutes >= startMinutes || currentMinutes < endMinutes
         }
         
         if shouldEnable && !isNightModeEnabled {
-            // Сохраняем текущую яркость
-            userDefaults.set(UIScreen.main.brightness, forKey: "previous_brightness")
-            isNightModeEnabled = true
+            enableNightMode()
         } else if !shouldEnable && isNightModeEnabled {
-            isNightModeEnabled = false
+            disableNightMode()
         }
     }
     
-    // MARK: - Quick Actions для ночного режима
+    // MARK: - Red Filter
     
-    func setupNightModeQuickActions() {
-        let playWhiteNoiseAction = UIMutableApplicationShortcutItem(
-            type: "com.babyshusha.nightmode.whitenoise",
-            localizedTitle: "Белый шум",
-            localizedSubtitle: "Ночной режим",
-            icon: UIApplicationShortcutIcon(systemImageName: "moon.zzz.fill"),
-            userInfo: nil
-        )
-        
-        let startTimerAction = UIMutableApplicationShortcutItem(
-            type: "com.babyshusha.nightmode.timer",
-            localizedTitle: "Таймер сна",
-            localizedSubtitle: "30 минут",
-            icon: UIApplicationShortcutIcon(systemImageName: "timer"),
-            userInfo: nil
-        )
-        
-        UIApplication.shared.shortcutItems = [playWhiteNoiseAction, startTimerAction]
+    private func enableRedFilter() {
+        DispatchQueue.main.async {
+            guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                  let window = windowScene.windows.first else { return }
+            
+            let redFilterView = UIView(frame: window.bounds)
+            redFilterView.backgroundColor = UIColor.red.withAlphaComponent(0.05)
+            redFilterView.tag = 9999
+            redFilterView.isUserInteractionEnabled = false
+            
+            window.addSubview(redFilterView)
+            self.redFilterView = redFilterView
+        }
+    }
+    
+    private func disableRedFilter() {
+        DispatchQueue.main.async {
+            self.redFilterView?.removeFromSuperview()
+            self.redFilterView = nil
+        }
     }
     
     // MARK: - Notification Handlers
@@ -240,50 +157,4 @@ final class NightModeService {
     @objc private func appDidBecomeActive() {
         checkAutoNightMode()
     }
-    
-    @objc private func appWillResignActive() {
-        // При уходе в фон можно уменьшить громкость
-        if isNightModeEnabled {
-            AudioService.shared.setVolume(0.3)
-        }
-    }
-    
-    // MARK: - Night Mode Features
-    
-    func startNightFeedingMode() {
-        // Специальный режим для ночных кормлений
-        enableNightMode()
-        
-        // Запускаем мягкий звук
-        AudioService.shared.playSound(named: "heartbeat.mp3", volume: 0.2, loop: true) { _ in }
-        
-        // Запускаем таймер на 20 минут (среднее время кормления)
-        Timer.scheduledTimer(withTimeInterval: 20 * 60, repeats: false) { _ in
-            AudioService.shared.stopAll()
-            self.disableNightMode()
-        }
-    }
-    
-    func getNightModeStats() -> NightModeStats {
-        let totalDuration = userDefaults.double(forKey: "night_mode_total_duration")
-        let sessionsCount = userDefaults.integer(forKey: "night_mode_sessions_count")
-        
-        return NightModeStats(
-            totalDuration: totalDuration,
-            sessionsCount: sessionsCount,
-            averageDuration: sessionsCount > 0 ? totalDuration / Double(sessionsCount) : 0
-        )
-    }
-}
-
-// MARK: - Extensions
-
-extension Notification.Name {
-    static let nightModeChanged = Notification.Name("nightModeChanged")
-}
-
-struct NightModeStats {
-    let totalDuration: TimeInterval // в секундах
-    let sessionsCount: Int
-    let averageDuration: TimeInterval
 }

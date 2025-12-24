@@ -1,60 +1,65 @@
-// Services/AudioService.swift
 import Foundation
 import AVFoundation
+import Combine
 
-class AudioService {
+class AudioService: ObservableObject {
     static let shared = AudioService()
     
-    private var audioPlayers: [String: AVAudioPlayer] = [:]
-    private let audioSession = AVAudioSession.sharedInstance()
+    @Published var isPlaying = false
+    @Published var currentVolume: Float = 0.7
     
-    private init() {
+    private var player: AVAudioPlayer?
+    
+    public init() {
         setupAudioSession()
     }
     
     private func setupAudioSession() {
         do {
-            try audioSession.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try audioSession.setActive(true)
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try AVAudioSession.sharedInstance().setActive(true)
         } catch {
-            print("Failed to setup audio session: \(error)")
+            print("Audio session error: \(error)")
         }
     }
     
-    func playSound(named filename: String, volume: Float = 0.5, loop: Bool = true) {
-        guard let url = Bundle.main.url(forResource: filename, withExtension: "mp3") else {
-            print("Sound file not found: \(filename)")
+    func playSound(named: String, volume: Float = 0.7, loop: Bool = false, completion: @escaping (Bool) -> Void) {
+        // Проверяем расширение файла
+        let fileName = named.hasSuffix(".mp3") ? named : "\(named).mp3"
+        
+        guard let url = Bundle.main.url(forResource: fileName, withExtension: nil) else {
+            print("Sound file not found: \(fileName)")
+            completion(false)
             return
         }
         
         do {
-            let player = try AVAudioPlayer(contentsOf: url)
-            player.volume = volume
-            player.numberOfLoops = loop ? -1 : 0
-            player.prepareToPlay()
-            player.play()
+            player?.stop()
+            player = try AVAudioPlayer(contentsOf: url)
+            player?.volume = volume
+            player?.numberOfLoops = loop ? -1 : 0
+            player?.play()
             
-            audioPlayers[filename] = player
+            isPlaying = true
+            currentVolume = volume
+            
+            completion(true)
+            
         } catch {
-            print("Error playing sound: \(error)")
+            print("Playback error: \(error)")
+            completion(false)
         }
     }
     
-    func stopSound(named filename: String) {
-        audioPlayers[filename]?.stop()
-        audioPlayers.removeValue(forKey: filename)
-    }
-    
-    func updateVolume(for filename: String, volume: Float) {
-        audioPlayers[filename]?.volume = volume
-    }
-    
     func stopAll() {
-        audioPlayers.values.forEach { $0.stop() }
-        audioPlayers.removeAll()
+        player?.stop()
+        player = nil
+        isPlaying = false
     }
     
-    func isPlaying(filename: String) -> Bool {
-        return audioPlayers[filename]?.isPlaying ?? false
+    func setVolume(_ volume: Float) {
+        currentVolume = volume
+        player?.volume = volume
     }
+    
 }

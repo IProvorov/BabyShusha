@@ -1,6 +1,10 @@
+import SwiftUI
+
 struct QuickActionsView: View {
     @EnvironmentObject var quickActionsService: QuickActionsService
-    @EnvironmentObject var childService: ChildProfileService
+    @EnvironmentObject var childProfileVM: ChildProfileViewModel
+    @EnvironmentObject var audioService: AudioService
+    
     @State private var actions: [QuickActionType] = []
     @State private var child: ChildProfile?
     
@@ -28,14 +32,13 @@ struct QuickActionsView: View {
                     // Информация о ребенке
                     if let child = child {
                         HStack {
-                            Image(systemName: "person.circle.fill")
+                            Text(child.avatarEmoji ?? "👶")
                                 .font(.title2)
-                                .foregroundColor(.blue)
                             
                             VStack(alignment: .leading) {
                                 Text(child.name)
                                     .font(.headline)
-                                Text("\(child.ageInMonths) месяцев")
+                                Text(child.ageDescription)
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -71,16 +74,15 @@ struct QuickActionsView: View {
     }
     
     private func loadData() {
-        childService.getActiveChild { child in
-            self.child = child
-            self.actions = quickActionsService.getQuickActions(for: child)
-        }
+        child = childProfileVM.activeChild
+        actions = quickActionsService.getQuickActions(for: child)
     }
 }
 
 struct QuickActionButton: View {
     let action: QuickActionType
     @EnvironmentObject var quickActionsService: QuickActionsService
+    @EnvironmentObject var audioService: AudioService
     @State private var isPerforming = false
     
     var body: some View {
@@ -130,23 +132,12 @@ struct QuickActionButton: View {
                 let generator = UIImpactFeedbackGenerator(style: .light)
                 generator.impactOccurred()
                 
-                // Показываем уведомление
-                if success {
-                    showSuccessAlert()
-                } else {
-                    showErrorAlert()
+                if !success {
+                    // Показать ошибку
+                    print("Ошибка при выполнении действия: \(action.title)")
                 }
             }
         }
-    }
-    
-    private func showSuccessAlert() {
-        // Можно использовать .alert или toast notification
-        print("\(action.title) успешно запущен")
-    }
-    
-    private func showErrorAlert() {
-        print("Ошибка при запуске \(action.title)")
     }
 }
 

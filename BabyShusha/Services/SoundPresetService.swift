@@ -1,36 +1,31 @@
 import Foundation
+import Combine
 
-final class SoundPresetService {
-    static let shared = SoundPresetService()
+class SoundPresetService: ObservableObject {
+    @Published var presets: [SoundPreset] = []
     
-    private let userDefaultsKey = "sound_presets"
-    private let fileManager = FileManager.default
-    private let presetsDirectory: URL
+    private let defaults = UserDefaults.standard
+    private let presetsKey = "sound_presets"
     
-    private init() {
-        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        presetsDirectory = documentsURL.appendingPathComponent("SoundPresets")
-        createPresetsDirectoryIfNeeded()
-    }
-    
-    private func createPresetsDirectoryIfNeeded() {
-        if !fileManager.fileExists(atPath: presetsDirectory.path) {
-            try? fileManager.createDirectory(at: presetsDirectory, withIntermediateDirectories: true)
-        }
+    public init() {
+        loadPresets()
     }
     
     // MARK: - CRUD Operations
     
-    func createPreset(name: String, sounds: [SoundType], volume: Float) -> SoundPreset {
-        let soundConfigs = sounds.map { type in
-            SoundPreset.SoundConfiguration(type: type, isEnabled: true, individualVolume: volume)
+    func createPreset(name: String, soundIds: [UUID], volume: Float = 0.7) -> SoundPreset {
+        let soundConfigs = soundIds.map { soundId in
+            SoundPreset.SoundConfiguration(
+                soundId: soundId,
+                isEnabled: true,
+                volume: volume
+            )
         }
         
         let preset = SoundPreset(
             id: UUID(),
             name: name,
             sounds: soundConfigs,
-            volume: volume,
             isFavorite: false,
             createdAt: Date()
         )
@@ -40,181 +35,205 @@ final class SoundPresetService {
     }
     
     func savePreset(_ preset: SoundPreset) {
-        var presets = getAllPresets()
-        
         if let index = presets.firstIndex(where: { $0.id == preset.id }) {
             presets[index] = preset
         } else {
             presets.append(preset)
         }
-        
-        saveAllPresets(presets)
+        saveAllPresets()
     }
     
     func deletePreset(_ preset: SoundPreset) {
-        var presets = getAllPresets()
         presets.removeAll { $0.id == preset.id }
-        saveAllPresets(presets)
+        saveAllPresets()
     }
     
     func getPreset(by id: UUID) -> SoundPreset? {
-        return getAllPresets().first { $0.id == id }
+        return presets.first { $0.id == id }
     }
     
     func getAllPresets() -> [SoundPreset] {
-        guard let data = UserDefaults.standard.data(forKey: userDefaultsKey) else {
-            return createDefaultPresets()
-        }
-        
-        do {
-            let presets = try JSONDecoder().decode([SoundPreset].self, from: data)
-            return presets.sorted { $0.lastUsed ?? $0.createdAt > $1.lastUsed ?? $1.createdAt }
-        } catch {
-            print("Error decoding presets: \(error)")
-            return createDefaultPresets()
+        return presets.sorted {
+            ($0.isFavorite && !$1.isFavorite) ||
+            ($0.createdAt > $1.createdAt)
         }
     }
     
     func getFavoritePresets() -> [SoundPreset] {
-        return getAllPresets().filter { $0.isFavorite }
+        return presets.filter { $0.isFavorite }
     }
     
-    func markPresetAsUsed(_ preset: SoundPreset) {
-        var updatedPreset = preset
-        updatedPreset.lastUsed = Date()
-        savePreset(updatedPreset)
-    }
-    
-    // MARK: - Default Presets
-    
-    private func createDefaultPresets() -> [SoundPreset] {
-        let defaultPresets = [
-            createNewbornPreset(),
-            createDeepSleepPreset(),
-            createCarRidePreset()
-        ]
-        
-        saveAllPresets(defaultPresets)
-        return defaultPresets
-    }
-    
-    private func createNewbornPreset() -> SoundPreset {
-        let sounds: [SoundPreset.SoundConfiguration] = [
-            .init(type: .heartbeat, isEnabled: true, individualVolume: 0.7),
-            .init(type: .whiteNoise, isEnabled: true, individualVolume: 0.5)
-        ]
-        
-        return SoundPreset(
-            id: UUID(),
-            name: "Для новорожденного",
-            sounds: sounds,
-            volume: 0.6,
-            isFavorite: true,
-            createdAt: Date()
-        )
-    }
-    
-    private func createDeepSleepPreset() -> SoundPreset {
-        let sounds: [SoundPreset.SoundConfiguration] = [
-            .init(type: .rain, isEnabled: true, individualVolume: 0.8),
-            .init(type: .whiteNoise, isEnabled: false, individualVolume: 0.0)
-        ]
-        
-        return SoundPreset(
-            id: UUID(),
-            name: "Глубокий сон",
-            sounds: sounds,
-            volume: 0.5,
-            isFavorite: true,
-            createdAt: Date()
-        )
-    }
-    
-    private func createCarRidePreset() -> SoundPreset {
-        let sounds: [SoundPreset.SoundConfiguration] = [
-            .init(type: .carRide, isEnabled: true, individualVolume: 0.9)
-        ]
-        
-        return SoundPreset(
-            id: UUID(),
-            name: "Поездка на машине",
-            sounds: sounds,
-            volume: 0.7,
-            isFavorite: false,
-            createdAt: Date()
-        )
-    }
-    
-    private func saveAllPresets(_ presets: [SoundPreset]) {
-        do {
-            let data = try JSONEncoder().encode(presets)
-            UserDefaults.standard.set(data, forKey: userDefaultsKey)
-        } catch {
-            print("Error encoding presets: \(error)")
-        }
-    }
-    
-    // MARK: - Preset Recommendations
-    
-    func recommendPresets(for child: ChildProfile?) -> [SoundPreset] {
-        let allPresets = getAllPresets()
-        guard let child = child else { return allPresets }
-        
-        let ageInMonths = child.ageInMonths
-        
-        return allPresets.filter { preset in
-            // Проверяем, подходят ли звуки в пресете по возрасту
-            let suitableSounds = preset.sounds.filter { config in
-                guard let ageRange = config.type.recommendedForAge else { return true }
-                return ageRange.contains(ageInMonths)
-            }
-            
-            return !suitableSounds.isEmpty || preset.sounds.isEmpty
+    func toggleFavorite(_ preset: SoundPreset) {
+        if var existingPreset = getPreset(by: preset.id) {
+            existingPreset.isFavorite.toggle()
+            savePreset(existingPreset)
         }
     }
     
     // MARK: - Audio Playback
     
-    func playPreset(_ preset: SoundPreset, completion: @escaping (Bool) -> Void) {
-        let audioService = AudioService.shared
-        
-        // Останавливаем текущее воспроизведение
+    func playPreset(_ preset: SoundPreset, audioService: AudioService, availableSounds: [Sound], completion: @escaping (Bool) -> Void) {
         audioService.stopAll()
         
-        // Запускаем все звуки из пресета
-        let enabledSounds = preset.sounds.filter { $0.isEnabled }
-        
-        guard !enabledSounds.isEmpty else {
+        let enabledConfigs = preset.sounds.filter { $0.isEnabled }
+        guard !enabledConfigs.isEmpty else {
             completion(false)
             return
         }
         
         var successfulPlays = 0
         
-        for soundConfig in enabledSounds {
-            let volume = preset.volume * soundConfig.individualVolume
-            
-            audioService.playSound(
-                named: soundConfig.type.fileName,
-                volume: volume,
-                loop: true
-            ) { success in
-                if success {
-                    successfulPlays += 1
-                }
+        for config in enabledConfigs {
+            // Находим звук по ID
+            if let sound = availableSounds.first(where: { $0.id == config.soundId }) {
+                let volume = config.volume
                 
-                // Когда все звуки обработаны
-                if successfulPlays + (enabledSounds.count - successfulPlays) == enabledSounds.count {
-                    let allSuccessful = successfulPlays == enabledSounds.count
-                    
-                    if allSuccessful {
-                        self.markPresetAsUsed(preset)
-                        AnalyticsService.logPresetUsed(preset)
+                audioService.playSound(named: sound.filename, volume: volume, loop: true) { success in
+                    if success {
+                        successfulPlays += 1
                     }
                     
-                    completion(allSuccessful)
+                    // Проверяем когда все звуки обработаны
+                    if successfulPlays + (enabledConfigs.count - successfulPlays) == enabledConfigs.count {
+                        completion(successfulPlays == enabledConfigs.count)
+                    }
                 }
             }
+        }
+    }
+    
+    // MARK: - Private Methods
+    
+    private func loadPresets() {
+        guard let data = defaults.data(forKey: presetsKey) else {
+            createDefaultPresets()
+            return
+        }
+        
+        do {
+            presets = try JSONDecoder().decode([SoundPreset].self, from: data)
+        } catch {
+            print("Error loading presets: \(error)")
+            createDefaultPresets()
+        }
+    }
+    
+    private func saveAllPresets() {
+        do {
+            let data = try JSONEncoder().encode(presets)
+            defaults.set(data, forKey: presetsKey)
+        } catch {
+            print("Error saving presets: \(error)")
+        }
+    }
+    
+    private func createDefaultPresets() {
+        // Создаем дефолтные пресеты
+        let defaultPresets = [
+            createDefaultNewbornPreset(),
+            createDefaultDeepSleepPreset(),
+            createDefaultCarRidePreset()
+        ]
+        
+        presets = defaultPresets
+        saveAllPresets()
+    }
+    
+    private func createDefaultNewbornPreset() -> SoundPreset {
+        // Создаем тестовые ID для звуков
+        let heartbeatId = UUID()
+        let whiteNoiseId = UUID()
+        
+        return SoundPreset(
+            id: UUID(),
+            name: "Для новорожденного",
+            sounds: [
+                SoundPreset.SoundConfiguration(
+                    soundId: heartbeatId,
+                    isEnabled: true,
+                    volume: 0.7
+                ),
+                SoundPreset.SoundConfiguration(
+                    soundId: whiteNoiseId,
+                    isEnabled: true,
+                    volume: 0.5
+                )
+            ],
+            isFavorite: true,
+            createdAt: Date()
+        )
+    }
+    
+    private func createDefaultDeepSleepPreset() -> SoundPreset {
+        let rainId = UUID()
+        
+        return SoundPreset(
+            id: UUID(),
+            name: "Глубокий сон",
+            sounds: [
+                SoundPreset.SoundConfiguration(
+                    soundId: rainId,
+                    isEnabled: true,
+                    volume: 0.8
+                )
+            ],
+            isFavorite: true,
+            createdAt: Date()
+        )
+    }
+    
+    private func createDefaultCarRidePreset() -> SoundPreset {
+        let carRideId = UUID()
+        
+        return SoundPreset(
+            id: UUID(),
+            name: "Поездка на машине",
+            sounds: [
+                SoundPreset.SoundConfiguration(
+                    soundId: carRideId,
+                    isEnabled: true,
+                    volume: 0.9
+                )
+            ],
+            isFavorite: false,
+            createdAt: Date()
+        )
+    }
+    
+    // MARK: - Recommendation Methods
+    
+    func recommendPresets(for child: ChildProfile?, availableSounds: [Sound]) -> [SoundPreset] {
+        let allPresets = getAllPresets()
+        
+        guard let child = child else { return allPresets }
+        
+        let ageInMonths = child.ageInMonths
+        
+        // Фильтруем пресеты по возрасту
+        return allPresets.filter { preset in
+            // Проверяем, подходят ли звуки в пресете по возрасту
+            let suitableSounds = preset.sounds.filter { config in
+                // Находим звук по ID
+                if let sound = availableSounds.first(where: { $0.id == config.soundId }) {
+                    return isSoundSuitableForAge(sound.type, ageInMonths: ageInMonths)
+                }
+                return true
+            }
+            
+            return !suitableSounds.isEmpty || preset.sounds.isEmpty
+        }
+    }
+    
+    private func isSoundSuitableForAge(_ soundType: Sound.SoundType, ageInMonths: Int) -> Bool {
+        switch soundType {
+        case .heartbeat:
+            return ageInMonths <= 6 // Сердцебиение подходит до 6 месяцев
+        case .whiteNoise:
+            return ageInMonths <= 24 // Белый шум до 2 лет
+        case .lullaby:
+            return ageInMonths >= 3 // Колыбельные с 3 месяцев
+        default:
+            return true // Остальные звуки для всех возрастов
         }
     }
 }
